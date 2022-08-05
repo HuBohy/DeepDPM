@@ -81,7 +81,7 @@ class MLP_Classifier(nn.Module):
                 weights_splits, split_decisions, init_new_weight=init_new_weights, subclusters_nets=subclusters_nets
             )
 
-            self.class_fc2.weight.data = torch.cat(
+            class_fc2.weight.data = torch.cat(
                 [weights_not_split, new_weights]
             )
 
@@ -89,7 +89,7 @@ class MLP_Classifier(nn.Module):
             bias_not_split = class_fc2.bias.data[torch.logical_not(split_decisions.bool())]
             bias_split = class_fc2.bias.data[split_decisions.bool()]
             new_bias = self._initalize_bias_split(bias_split, split_decisions, init_new_weight=init_new_weights, subclusters_nets=subclusters_nets)
-            self.class_fc2.bias.data = torch.cat([bias_not_split, new_bias])
+            class_fc2.bias.data = torch.cat([bias_not_split, new_bias])
 
     def update_K_merge(self, merge_decisions, pairs_to_merge, highest_ll, init_new_weights="same"):
         """ Update the clustering net after a merge decision was made

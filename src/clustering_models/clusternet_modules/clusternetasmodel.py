@@ -5,11 +5,13 @@
 #
 
 from argparse import ArgumentParser
+from cv2 import transform
 import numpy as np
 import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
 
 import torch
-from torch import optim
+from torch import optim, tensor
 import pytorch_lightning as pl
 from sklearn.metrics.cluster import normalized_mutual_info_score
 from sklearn.metrics import adjusted_rand_score, silhouette_score, adjusted_mutual_info_score, homogeneity_completeness_v_measure
@@ -84,9 +86,8 @@ class ClusterNetModel(pl.LightningModule):
     def forward(self, x):
         if self.feature_extractor is not None:
             with torch.no_grad():
-                codes = torch.from_numpy(
-                    self.feature_extractor(x.view(x.size()[0], -1), latent=True)
-                ).to(device=self.device)
+                codes = self.feature_extractor(x.view(x.size()[0], -1)).to(device=self.device)
+                codes = torch.median(codes, dim=-1, keepdim=True).values
         else:
             codes = x
 
@@ -129,9 +130,8 @@ class ClusterNetModel(pl.LightningModule):
         x, y = batch
         if self.feature_extractor is not None:
             with torch.no_grad():
-                codes = torch.from_numpy(
-                    self.feature_extractor(x.view(x.size()[0], -1), latent=True)
-                ).to(device=self.device)
+                codes = self.feature_extractor(x.view(x.size()[0], -1)).to(device=self.device)
+                codes = torch.median(codes, dim=-1, keepdim=True).values
         else:
             codes = x
 
@@ -168,6 +168,8 @@ class ClusterNetModel(pl.LightningModule):
                 y=y,
                 logits=None,
             )
+            # for file in self.codes:
+            #     self.pca = PCA(1).fit(file)
         return None
 
     def cluster_net_pretraining(
@@ -185,6 +187,8 @@ class ClusterNetModel(pl.LightningModule):
             y: The ground truth labels
             optimizer_idx ([type]): The pytorch optimizer index
         """
+        # for ii in range(len(codes)):
+        #     codes[ii] = self.pca.transform(codes[ii])
         codes = codes.view(-1, self.codes_dim)
         logits = self.cluster_net(codes)
         cluster_loss = self.training_utils.cluster_loss_function(
@@ -261,9 +265,8 @@ class ClusterNetModel(pl.LightningModule):
         x, y = batch
         if self.feature_extractor is not None:
             with torch.no_grad():
-                codes = torch.from_numpy(
-                    self.feature_extractor(x.view(x.size()[0], -1), latent=True)
-                ).to(device=self.device)
+                codes = self.feature_extractor(x.view(x.size()[0], -1)).to(device=self.device)
+                codes = torch.median(codes, dim=-1, keepdim=True).values
         else:
             codes = x
 
@@ -287,7 +290,7 @@ class ClusterNetModel(pl.LightningModule):
             self.log("cluster_net_train/val/cluster_loss", loss)
 
             if self.current_epoch >= self.hparams.start_sub_clustering and not self.hparams.ignore_subclusters:
-                subclusters = self.subcluster(codes, logits)
+                subclusters = self.subcluster(codes.view(-1, self.codes_dim), logits)
                 subcluster_loss = self.training_utils.subcluster_loss_function_new(
                     codes.view(-1, self.codes_dim),
                     logits,
@@ -447,7 +450,7 @@ class ClusterNetModel(pl.LightningModule):
                     self.covs,
                 ) = self.training_utils.comp_cluster_params(
                     self.train_resp,
-                    self.codes.view(-1, self.codes_dim),
+                    self.codes,
                     self.pi,
                     self.K,
                     self.prior,
@@ -478,7 +481,7 @@ class ClusterNetModel(pl.LightningModule):
                 ) = self.training_utils.comp_subcluster_params(
                     self.train_resp,
                     self.train_resp_sub,
-                    self.codes,
+                    self.codes.view(-1, self.codes_dim),
                     self.K,
                     self.n_sub,
                     self.mus_sub,
@@ -491,7 +494,7 @@ class ClusterNetModel(pl.LightningModule):
                 self.training_utils.last_performed = "split"
                 split_decisions = split_step(
                     self.K,
-                    self.codes,
+                    self.codes.view(-1, self.codes_dim),
                     self.train_resp,
                     self.train_resp_sub,
                     self.mus,

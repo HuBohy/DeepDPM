@@ -101,7 +101,7 @@ class NIW_prior:
         self.prior_sigma_choice = hparams.prior_sigma_choice
         self.prior_sigma_scale = prior_sigma_scale or hparams.prior_sigma_scale
         self.niw_kappa = hparams.prior_kappa
-        self.niw_nu = hparams.prior_nu
+        self.niw_nu = hparams.prior_nu if hparams.prior_nu > hparams.latent_dim else hparams.latent_dim + 1.0
 
     def init_priors(self, codes):
         if self.prior_mu_0_choice == "data_mean":

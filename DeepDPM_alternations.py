@@ -171,8 +171,8 @@ if __name__ == "__main__":
         logger = DummyLogger()
     else:
         logger = NeptuneLogger(
-                api_key='your_api_token',
-                project_name='your_project_name',
+                api_key=os.environ['NEPTUNE_API_TOKEN'],
+                project_name='hubohy/DeepDPM',
                 experiment_name=args.tag,
                 params=vars(args),
                 tags=tags
@@ -197,15 +197,20 @@ if __name__ == "__main__":
 
     max_epochs = args.epoch * (args.number_of_ae_alternations - 1) + 1
 
+    # Trainer
+    print("Trainer")
     trainer = pl.Trainer(logger=logger, max_epochs=max_epochs, gpus=args.gpus, num_sanity_val_steps=0, checkpoint_callback=False)
     trainer.fit(model, train_loader, val_loader)
 
+    # DeepDPM
+    print("DeepDPM")
     model.to(device=device)
     DeepDPM = model.clustering.model.cluster_model
     DeepDPM.to(device=device)
     # evaluate last model
     for i, dataset in enumerate([data.get_train_data(), data.get_test_data()]):
-        data_, labels_ = dataset.tensors[0], dataset.tensors[1].numpy()
+        data_, labels_ = torch.tensor(data.get_train_data().data), data.get_train_data().targets.detach()
+        print(data_)
         pred = DeepDPM(data_.to(device=device)).argmax(axis=1).cpu().numpy()
 
         acc = np.round(cluster_acc(labels_, pred), 5)

@@ -71,14 +71,16 @@ class embbededDataset:
     def get_train_loader(self):
         train_loader = torch.utils.data.DataLoader(
             self.get_train_data(),
-            batch_size=self.args.batch_size, shuffle=True, num_workers=3
+            batch_size=self.args.batch_size, shuffle=True, num_workers=4,
+            pin_memory=True
         )
         return train_loader
 
     def get_test_loader(self):
         test_loader = torch.utils.data.DataLoader(
             self.get_test_data(),
-            batch_size=self.args.batch_size, shuffle=False, num_workers=3
+            batch_size=self.args.batch_size, shuffle=False, num_workers=4,
+            pin_memory=True
         )
         return test_loader
 

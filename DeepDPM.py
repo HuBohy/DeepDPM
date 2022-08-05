@@ -10,19 +10,24 @@ import os
 from pytorch_lightning.loggers.neptune import NeptuneLogger
 from pytorch_lightning.loggers.base import DummyLogger
 import pytorch_lightning as pl
+from sklearn.decomposition import PCA
 from sklearn.metrics import normalized_mutual_info_score as NMI
 from sklearn.metrics import adjusted_rand_score as ARI
 from scipy.optimize import linear_sum_assignment as linear_assignment
 import numpy as np
+import matplotlib.pyplot as plt
+
+from glob import glob
+import fairseq
 
 from src.embbeded_datasets import embbededDataset
-from src.datasets import GMM_dataset
+from src.datasets import GMM_dataset, W2VDataset
 from src.clustering_models.clusternet_modules.clusternetasmodel import ClusterNetModel
 
 
 def parse_minimal_args(parser):
     # Dataset parameters
-    parser.add_argument("--dir", default="./pretrained_embeddings/umap_embedded_datasets/", help="dataset directory")
+    parser.add_argument("--dir", default="../DATASETS/NDC-ME", help="dataset directory")
     parser.add_argument("--dataset", default="MNIST_N2D")
     # Training parameters
     parser.add_argument(
@@ -387,7 +392,23 @@ def cluster_acc(y_true, y_pred):
     return w[row_ind, col_ind].sum() * 1.0 / y_pred.size
 
 
+def load_extractor(model_dir: str, ext: str):
+    models = glob(os.path.join(model_dir, f'*.{ext}'))
+    for model_pt in models:
+        try:
+            model, _ = fairseq.checkpoint_utils.load_model_ensemble([model_pt])
+            feature_extractor = model[0].feature_extractor
+            for param in feature_extractor.parameters():
+                param.requires_grad = False
+        except Exception as e:
+            continue
+    try:
+        return feature_extractor
+    except Exception as e:
+        raise e
+
 def train_cluster_net():
+
     parser = argparse.ArgumentParser(description="Only_for_embbedding")
     parser = parse_minimal_args(parser)
     parser = run_on_embeddings_hyperparams(parser)
@@ -398,8 +419,11 @@ def train_cluster_net():
     
     if args.dataset == "synthetic":
         dataset_obj = GMM_dataset(args)
+        feat_extract = None
     else:
-        dataset_obj = embbededDataset(args)
+        # dataset_obj = embbededDataset(args)
+        dataset_obj = W2VDataset(args)
+        feat_extract = load_extractor(os.path.join(os.path.dirname(__file__), "wav2vec_pt"), ext='pt')
     train_loader, val_loader = dataset_obj.get_loaders()
 
     tags = ['umap_embbeded_dataset']
@@ -410,8 +434,8 @@ def train_cluster_net():
         logger = DummyLogger()
     else:
         logger = NeptuneLogger(
-                api_key='your_API_token',
-                project_name='your_project_name',
+                api_key=os.environ['NEPTUNE_API_TOKEN'],
+                project_name='hubohy/DeepDPM',
                 experiment_name=args.exp_name,
                 params=vars(args),
                 tags=tags
@@ -428,7 +452,7 @@ def train_cluster_net():
     if args.seed:
         pl.utilities.seed.seed_everything(args.seed)
     
-    model = ClusterNetModel(hparams=args, input_dim=args.latent_dim, init_k=args.init_k)
+    model = ClusterNetModel(hparams=args, input_dim=args.latent_dim, init_k=args.init_k, feature_extractor=feat_extract)
     if args.save_checkpoints:
         from pytorch_lightning.callbacks import ModelCheckpoint
         checkpoint_callback = ModelCheckpoint(dirpath = f"./saved_models/{args.dataset}/{args.exp_name}")
@@ -438,19 +462,41 @@ def train_cluster_net():
     else:
         checkpoint_callback = False
     
+    ax = plt.axes()
+    x, y = next(iter(train_loader))
+    x_emb = feat_extract(x.view(x.size()[0], -1)).detach().numpy()
+    print(x_emb.shape)
+    import torch
+    x_emb = torch.mean(torch.from_numpy(x_emb), dim=-1, keepdim=True)
+    print(x_emb.shape)
+    x_pca = PCA(2).fit_transform(x_emb.view(-1, 512))
+    
+    ax.scatter(x_pca[:, 0], x_pca[:, 1])
+    plt.show()
+
     trainer = pl.Trainer(logger=logger, max_epochs=args.max_epochs, gpus=args.gpus, num_sanity_val_steps=0, checkpoint_callback=checkpoint_callback, limit_train_batches=args.limit_train_batches, limit_val_batches=args.limit_val_batches)
     trainer.fit(model, train_loader, val_loader)
 
     # evaluate last model
-    dataset = dataset_obj.get_train_data()
-    data, labels = dataset.tensors[0], dataset.tensors[1].numpy()
-    net_pred = model(data).argmax(axis=1).cpu().numpy()
+    # dataset = dataset_obj.get_val_data()
+    # data, labels = dataset.tensors[0], dataset.tensors[1].numpy()
+    # data, labels = next(iter(train_loader))
+    # net_pred = model(data).argmax(axis=1).cpu().numpy()
 
-    acc = np.round(cluster_acc(labels, net_pred), 5)
-    nmi = np.round(NMI(net_pred, labels), 5)
-    ari = np.round(ARI(net_pred, labels), 5)
+    # acc = np.round(cluster_acc(labels, net_pred), 5)
+    # nmi = np.round(NMI(net_pred, labels), 5)
+    # ari = np.round(ARI(net_pred, labels), 5)
 
-    print(f"NMI: {nmi}, ARI: {ari}, acc: {acc}, final K: {len(np.unique(net_pred))}")
+    # print(f"NMI: {nmi}, ARI: {ari}, acc: {acc}, final K: {len(np.unique(net_pred))}")
+
+    ax = plt.axes()
+    x, y = next(iter(train_loader))
+    x_emb = feat_extract(x.view(x.size()[0], -1)).detach().numpy()
+    x_pca = PCA(2).fit_transform(x_emb)
+    embs = model(x).detach().numpy()
+
+    ax.scatter(x_pca[:, 0], x_pca[:, 1], c=np.argmax(embs, axis=-1))
+    plt.show()
 
 
 if __name__ == "__main__":

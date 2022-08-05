@@ -7,9 +7,12 @@
 import os
 import torch
 from torchvision import datasets, transforms
-from torch.utils.data import TensorDataset
+from torch.utils.data import TensorDataset, Dataset, DataLoader
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, Normalizer
+
+import scipy.io.wavfile as wf
+from glob import glob
 
 class MyDataset:
     @property
@@ -360,3 +363,129 @@ def generate_mock_dataset(dim, len=3, dtype=torch.float32):
         data = torch.rand((len, *dim))
     data = torch.tensor(data.clone().detach(), dtype=dtype)
     return TensorDataset(data, torch.zeros(len))
+
+class AudioDataset(Dataset):
+    def __init__(
+        self, wav_dir: str,
+        ext: str ='npz',
+        train: bool = True,
+        transform = None,
+        wav_files: list = None,
+        labels: list = None
+    ) -> None:
+        super(AudioDataset, self).__init__()
+        self.wav_dir = wav_dir
+        self.wav_files = wav_files if wav_files != None else load_files(wav_dir, ext, name_format='{}/*'.format('train' if train else 'val'))
+        self.labels = torch.tensor(np.arange(len(self.wav_files)) if labels == None else labels)
+        self.ext = ext
+
+        self.transform = transform
+        self.load_codes()
+
+        ########## TODO: Pre-process data and assert data lenght
+        self.data_lenght = 17600
+        
+
+        if len(self.wav_files) == 0:
+            raise FileNotFoundError(f'No file found in {wav_dir}')
+
+    def __len__(self):
+        return len(self.wav_files)
+
+    def __getitem__(self, index):
+        codes = self.codes[index]
+        
+        ########## TODO: get labels from self.labels
+        labels = self.labels[index]
+
+        return codes, labels
+    
+    def load_codes(self):
+        codes = []
+        if self.ext == 'npz':
+            for file in self.wav_files:
+                codes.append(np.load(file)['data'])
+        elif self.ext == 'wav':
+            for file in self.wav_files:
+                codes.append(wf.read(file)[1])
+        
+        self.codes = torch.tensor(np.array(codes))
+        ########## TODO: Pre-process data and assert data lenght
+
+        if self.transform:
+            if self.transform in ['normalize', 'standard_normalize']:
+                self.codes = torch.Tensor(Normalizer().fit_transform(self.codes)) ########## TODO: remove .resize_ once data have been preprocessed
+
+
+        self.codes = self.codes.view(*self.codes.shape, 1)
+
+class W2VDataset:
+    @property
+    def input_dim(self):
+        return self._input_dim
+
+    @property
+    def latent_dim(self):
+        return self._latent_dim
+
+    def __init__(self, args) -> None:
+        self.ds_name = args.dataset
+        self.args = args
+        self.data_dir = os.path.join("DATASETS/", "NDC-ME/segmented/audio")
+        # TODO: generalize datatype
+        self.data_type = AudioDataset
+
+        self._input_dim = args.features_dim
+        self._latent_dim = args.latent_dim
+        self.transform = args.transform
+
+        self.train_data = self.data_type(
+            self.data_dir,
+            train=True,
+            transform=self.transform
+        )
+
+        self.val_data = self.data_type(
+            self.data_dir,
+            train=False,
+            transform=self.transform
+        )
+
+    def get_train_loader(self):
+        print("Loading train data")
+        train_loader = DataLoader(
+            self.train_data,
+            batch_size=self.args.batch_size,
+            shuffle=True,
+            num_workers=8,
+            drop_last=True
+        )
+        print("Loading done")
+        return train_loader
+
+    
+    def get_test_loader(self):
+        test_loader = DataLoader(
+            self.val_data,
+            batch_size=self.args.batch_size,
+            shuffle=True,
+            num_workers=8,
+            drop_last=True
+        )
+        return test_loader
+
+    def get_loaders(self):
+        return self.get_train_loader(), self.get_test_loader()
+
+def load_files(data_dir: str, ext: str, name_format='*') -> list:
+    try:
+        files = glob(os.path.join(os.path.abspath(data_dir), '**', f'{name_format}.{ext}'), recursive=True)
+        if len(files) == 0:
+            files = glob(os.path.join(os.path.abspath(data_dir), '**', f'{name_format}.{(ext).upper()}'), recursive=True)
+
+        if len(files) == 0:
+            raise FileNotFoundError(f"{os.path.abspath(data_dir)} does not contain {ext} files.")
+    except FileNotFoundError:
+        raise 
+    else:
+        return files
