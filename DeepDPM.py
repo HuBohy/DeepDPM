@@ -464,12 +464,15 @@ def train_cluster_net():
     
     ax = plt.axes()
     x, y = next(iter(train_loader))
-    x_emb = feat_extract(x.view(x.size()[0], -1)).detach().numpy()
-    print(x_emb.shape)
-    import torch
-    x_emb = torch.mean(torch.from_numpy(x_emb), dim=-1, keepdim=True)
-    print(x_emb.shape)
-    x_pca = PCA(2).fit_transform(x_emb.view(-1, 512))
+    if feat_extract is not None:
+        x_emb = feat_extract(x.view(x.size()[0], -1)).detach().numpy()
+        import torch
+        x_emb = torch.mean(torch.from_numpy(x_emb), dim=-1, keepdim=True)
+        print(x_emb.shape)
+    else:
+        x_emb = x.view(x.size()[0], -1)
+        print(x_emb.shape)
+    x_pca = PCA(2).fit_transform(x_emb.view(-1, args.latent_dim))
     
     ax.scatter(x_pca[:, 0], x_pca[:, 1])
     plt.show()
